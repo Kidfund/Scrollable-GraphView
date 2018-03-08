@@ -850,25 +850,11 @@ import UIKit
         let pathSegmentAdder = lineStyle == .straight ? addStraightLineSegment : addCurvedLineSegment
         
         zeroYPosition = calculatePosition(atIndex: 0, value: self.range.min).y
-        
-        // Connect the line to the starting edge if we are filling it.
-        if(shouldFill) {
-            // Add a line from the base of the graph to the first data point.
-            let firstDataPoint = graphPoints[activePointsInterval.lowerBound]
-            
-            let viewportLeftZero = CGPoint(x: firstDataPoint.x - (leftmostPointPadding), y: zeroYPosition)
-            let leftFarEdgeTop = CGPoint(x: firstDataPoint.x - (leftmostPointPadding + viewportWidth), y: zeroYPosition)
-            let leftFarEdgeBottom = CGPoint(x: firstDataPoint.x - (leftmostPointPadding + viewportWidth), y: viewportHeight)
-            
-            currentLinePath.move(to: leftFarEdgeBottom)
-            pathSegmentAdder(leftFarEdgeBottom, leftFarEdgeTop, currentLinePath)
-            pathSegmentAdder(leftFarEdgeTop, viewportLeftZero, currentLinePath)
-            pathSegmentAdder(viewportLeftZero, CGPoint(x: firstDataPoint.x, y: firstDataPoint.y), currentLinePath)
-        }
-        else {
-            let firstDataPoint = graphPoints[activePointsInterval.lowerBound]
-            currentLinePath.move(to: firstDataPoint.location)
-        }
+
+        let firstDataPoint = graphPoints[activePointsInterval.lowerBound].location
+        let leftDataEdgeTop = CGPoint(x: firstDataPoint.x, y: zeroYPosition)
+        currentLinePath.move(to: leftDataEdgeTop)
+        currentLinePath.addLine(to: firstDataPoint)
         
         // Connect each point on the graph with a segment.
         for i in activePointsInterval.lowerBound ..< activePointsInterval.upperBound - 1 {
@@ -879,21 +865,67 @@ import UIKit
             pathSegmentAdder(startPoint, endPoint, currentLinePath)
         }
         
-        // Connect the line to the ending edge if we are filling it.
-        if(shouldFill) {
-            // Add a line from the last data point to the base of the graph.
-            let lastDataPoint = graphPoints[activePointsInterval.upperBound - 1]
-            
-            let viewportRightZero = CGPoint(x: lastDataPoint.x + (rightmostPointPadding), y: zeroYPosition)
-            let rightFarEdgeTop = CGPoint(x: lastDataPoint.x + (rightmostPointPadding + viewportWidth), y: zeroYPosition)
-            let rightFarEdgeBottom = CGPoint(x: lastDataPoint.x + (rightmostPointPadding + viewportWidth), y: viewportHeight)
-            
-            pathSegmentAdder(lastDataPoint.location, viewportRightZero, currentLinePath)
-            pathSegmentAdder(viewportRightZero, rightFarEdgeTop, currentLinePath)
-            pathSegmentAdder(rightFarEdgeTop, rightFarEdgeBottom, currentLinePath)
-        }
+        let lastDataPoint = graphPoints[activePointsInterval.upperBound - 1].location
+        let rightDataEdgeTop = CGPoint(x: lastDataPoint.x, y: zeroYPosition)
+
+        currentLinePath.addLine(to: rightDataEdgeTop)
         
         return currentLinePath
+    }
+
+    fileprivate func pathForLine() -> UIBezierPath {
+        let linePath = UIBezierPath()
+
+        let pathSegmentAdder = lineStyle == .straight ? addStraightLineSegment : addCurvedLineSegment
+
+        zeroYPosition = calculatePosition(atIndex: 0, value: self.range.min).y
+
+        let firstDataPoint = graphPoints[activePointsInterval.lowerBound].location
+        let leftDataEdgeTop = CGPoint(x: firstDataPoint.x, y: zeroYPosition)
+        linePath.move(to: leftDataEdgeTop)
+        linePath.addLine(to: firstDataPoint)
+
+        // Connect each point on the graph with a segment.
+        for i in activePointsInterval.lowerBound ..< activePointsInterval.upperBound - 1 {
+
+            let startPoint = graphPoints[i].location
+            let endPoint = graphPoints[i+1].location
+
+            pathSegmentAdder(startPoint, endPoint, linePath)
+        }
+
+        return linePath
+    }
+
+    fileprivate func pathForFill() -> UIBezierPath {
+        let fillPath = UIBezierPath()
+
+        let pathSegmentAdder = lineStyle == .straight ? addStraightLineSegment : addCurvedLineSegment
+
+        zeroYPosition = calculatePosition(atIndex: 0, value: self.range.min).y
+
+        let firstDataPoint = graphPoints[activePointsInterval.lowerBound].location
+        let leftDataEdgeTop = CGPoint(x: firstDataPoint.x, y: zeroYPosition)
+        fillPath.move(to: leftDataEdgeTop)
+        fillPath.addLine(to: firstDataPoint)
+
+        // Connect each point on the graph with a segment.
+        for i in activePointsInterval.lowerBound ..< activePointsInterval.upperBound - 1 {
+
+            let startPoint = graphPoints[i].location
+            let endPoint = graphPoints[i+1].location
+
+            pathSegmentAdder(startPoint, endPoint, fillPath)
+        }
+
+        let lastDataPoint = graphPoints[activePointsInterval.upperBound - 1].location
+        let farRightDataEdgeBottom = CGPoint(x: lastDataPoint.x * 10, y: lastDataPoint.y)
+        let farRightDataEdgeTop = CGPoint(x: lastDataPoint.x * 10, y: zeroYPosition)
+
+        fillPath.addLine(to: farRightDataEdgeBottom)
+        fillPath.addLine(to: farRightDataEdgeTop)
+
+        return fillPath
     }
     
     private func addStraightLineSegment(startPoint: CGPoint, endPoint: CGPoint, inPath path: UIBezierPath) {
@@ -913,7 +945,7 @@ import UIKit
         let controlPointTwo = CGPoint(x: x, y: y)
         
         // add curve from start to end
-        currentLinePath.addCurve(to: endPoint, controlPoint1: controlPointOne, controlPoint2: controlPointTwo)
+        path.addCurve(to: endPoint, controlPoint1: controlPointOne, controlPoint2: controlPointTwo)
     }
     
     // MARK: Events
@@ -1266,6 +1298,8 @@ private protocol ScrollableGraphViewDrawingDelegate {
     func graphPoint(forIndex index: Int) -> GraphPoint
     
     func currentPath() -> UIBezierPath
+    func pathForLine() -> UIBezierPath
+    func pathForFill() -> UIBezierPath
 }
 
 // MARK: Drawing Layer Classes
@@ -1414,7 +1448,7 @@ private class LineDrawingLayer : ScrollableGraphViewDrawingLayer {
     }
     
     override func updatePath() {
-        self.path = graphViewDrawingDelegate?.currentPath().cgPath
+        self.path = graphViewDrawingDelegate?.pathForLine().cgPath
     }
 }
 
@@ -1557,7 +1591,7 @@ private class GradientDrawingLayer : ScrollableGraphViewDrawingLayer {
     }
     
     override func updatePath() {
-        gradientMask.path = graphViewDrawingDelegate?.currentPath().cgPath
+        gradientMask.path = graphViewDrawingDelegate?.pathForFill().cgPath
     }
     
     override func draw(in ctx: CGContext) {
@@ -1595,7 +1629,7 @@ private class FillDrawingLayer : ScrollableGraphViewDrawingLayer {
     }
     
     override func updatePath() {
-        self.path = graphViewDrawingDelegate?.currentPath().cgPath
+        self.path = graphViewDrawingDelegate?.pathForFill().cgPath
     }
 }
 
